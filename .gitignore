@@ -1,0 +1,8 @@
+# terraform init pulls ~900MB of providers and modules into here.
+.terraform/
+
+# State and variable files can carry account ids, IPs and secrets.
+*.tfstate
+*.tfstate.*
+*.tfvars
+crash.log

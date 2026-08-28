@@ -1,0 +1,159 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: asiayo
+---
+# fileSystemId comes from `terraform output efs_file_system_id`.
+# One access point per PVC keeps the volumes isolated on a shared file system.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: efs-sc
+provisioner: efs.csi.aws.com
+parameters:
+  provisioningMode: efs-ap
+  fileSystemId: fs-REPLACE_WITH_TERRAFORM_OUTPUT
+  directoryPerms: "700"
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+---
+# ReadWriteMany: all three web pods sit in different AZs and share this volume.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: web-shared
+  namespace: asiayo
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: efs-sc
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: asiayo
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      # One replica per AZ. DoNotSchedule on zone is what actually enforces the
+      # spread; hostname is best-effort so a busy node cannot block a rollout.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: web
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: web
+      containers:
+        - name: web
+          image: nginx:1.29-alpine
+          ports:
+            - name: http
+              containerPort: 80
+          env:
+            # Writes go to the router's R/W port, reads to the R/O port; the
+            # router follows the InnoDB Cluster's current primary on failover.
+            - name: MYSQL_HOST
+              value: asiayo-mysql.asiayo.svc.cluster.local
+            - name: MYSQL_PORT_RW
+              value: "6446"
+            - name: MYSQL_PORT_RO
+              value: "6447"
+          volumeMounts:
+            - name: shared
+              mountPath: /usr/share/nginx/html/shared
+          # Startup probe first so a slow boot is not mistaken for a crash loop.
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 5
+            failureThreshold: 12
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: shared
+          persistentVolumeClaim:
+            claimName: web-shared
+---
+# Keeps two replicas up during node drains and cluster upgrades.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: web
+  namespace: asiayo
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: web
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: asiayo
+spec:
+  type: ClusterIP
+  selector:
+    app: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# target-type: ip is required here. The ALB's default instance mode targets
+# NodePorts, which a ClusterIP Service does not expose.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web
+  namespace: asiayo
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /
+spec:
+  ingressClassName: alb
+  rules:
+    - host: asiayo.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
