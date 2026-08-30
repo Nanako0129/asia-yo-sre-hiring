@@ -10,6 +10,7 @@
 | 情境實戰測驗 | 題目一：活動網頁的百倍流量 | [question-1.md](./scenario/question-1.md) | — |
 | 情境實戰測驗 | 題目二：叢集中單一機器回應逾時 | [question-2.md](./scenario/question-2.md) | — |
 | 情境實戰測驗 | 題目三：EC2 服務正常但無法 SSH | [question-3.md](./scenario/question-3.md) | — |
+| 情境實戰測驗 | 題目四：新服務串接 ELK/EFK | [question-4.md](./scenario/question-4.md) | — |
 
 ## 執行
 
