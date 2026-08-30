@@ -12,6 +12,8 @@
 | 情境實戰測驗 | 題目三：EC2 服務正常但無法 SSH | [question-3.md](./scenario/question-3.md) | — |
 | 情境實戰測驗 | 題目四：新服務串接 ELK/EFK | [question-4.md](./scenario/question-4.md) | — |
 
+與 AI agent 的對話記錄：[ai-transcript.md](./ai-transcript.md)
+
 ## 執行
 
 ```bash
